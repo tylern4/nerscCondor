@@ -88,4 +88,3 @@ cleanup:
 
 `kill $(ps aux | grep -v grep | grep -i condor_master | awk '{print $2}')`
 
-
