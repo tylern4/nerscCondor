@@ -1,5 +1,5 @@
 universe = vanilla
-executable   = test.sh
+executable   = sleep.sh
 arguments = $(Process)
 output       = out/outputfile.$(Cluster).$(Process)
 error        = log/$(Cluster).$(Process).err
@@ -12,4 +12,4 @@ request_disk = 512
 should_transfer_files = yes
 
 
-queue 2
+queue 10
