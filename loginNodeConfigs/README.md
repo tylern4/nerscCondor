@@ -79,3 +79,7 @@ cd /global/homes/t/tylern/condor/working_02172022
 ./start_worker.sh
 
 ```
+
+### cleanup cori19
+
+`kill $(ps aux | grep -v grep | grep -i condor_master | awk '{print $2}')`
