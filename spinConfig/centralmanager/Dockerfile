@@ -4,8 +4,8 @@ ENV VERSION=$VERSION
 
 # Default envs 
 ENV USER=docker \
-    PORT=5432 \
-    HOSTNAME=nersc.org \
+    PORT=9618 \
+    HOSTNAME=127.0.0.1 \
     PASSWORDFILE=/etc/condor/password.d/POOL
 
 COPY pre-exec.sh /root/config/pre-exec.sh
