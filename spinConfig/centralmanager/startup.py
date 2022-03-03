@@ -26,7 +26,7 @@ PRIVATE_NETWORK_NAME = $(FULL_HOSTNAME)
 TCP_FORWARDING_HOST = {HOSTNAME}
 
 
-SEC_PASSWORD_FILE = {PASSWORDFILE}
+SEC_PASSWORD_FILE = /etc/condor/passwords.d/{PASSWORDFILE}
 SEC_DEFAULT_AUTHENTICATION_METHODS = PASSWORD, FS
 
 ALLOW_READ = 128.55.*, 10.*, $(FULL_HOSTNAME), {HOSTNAME}, *
@@ -81,7 +81,7 @@ USE_SHARED_PORT = True
 LOCAL_DIR = /global/cscratch1/sd/{USERNAME}/condor/$(HOSTNAME)
 RELEASE_DIR = /global/common/software/m3792/htcondor
 
-SEC_PASSWORD_FILE = /global/homes/t/{USERNAME}/.condor/{LOCALPASSWORDFILE}
+SEC_PASSWORD_FILE = /global/homes/t/{USERNAME}/.condor/{PASSWORDFILE}
 SEC_DEFAULT_AUTHENTICATION_METHODS = PASSWORD, FS
 
 ALLOW_READ = 128.55.*, 10.*
@@ -99,8 +99,6 @@ SCHEDD_DEBUG = D_FULLDEBUG
 if __name__ == '__main__':
     env_vars = {key: os.environ.get(key)
                 for key in ["USERNAME", "PORT", "HOSTNAME", "PASSWORDFILE"]}
-
-    env_vars['LOCALPASSWORDFILE'] = env_vars['PASSWORDFILE'].split("/")[-1]
 
     # Prints a file to be copy/pasted into a config file for cori
     print(cori_conf.format(**env_vars))

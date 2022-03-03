@@ -12,29 +12,6 @@ def read_root():
             "htcondor": htcondor.__version__}
 
 
-# @app.route('/hostname', methods=['GET'])
-# def hostname():
-#     hostname_job = htcondor.Submit({
-#         "executable": "/bin/hostname",  # the program to run on the execute node
-#         # anything the job prints to standard output will end up in this file
-#         "output": "/home/submituser/jobs/hostname/outputs/hostname.$(Cluster).$(Process).out",
-#         # anything the job prints to standard error will end up in this file
-#         "error": "/home/submituser/jobs/hostname/outputs/hostname.$(Cluster).$(Process).err",
-#         # this file will contain a record of what happened to the job
-#         "log": "/home/submituser/jobs/hostname/log/hostname.$(Cluster).$(Process).log",
-#         "request_cpus": "1",            # how many CPU cores we want
-#         "request_memory": "128MB",      # how much memory we want
-#         "request_disk": "128MB",        # how much disk space we want
-#     })
-
-#     # get the Python representation of the scheduler
-#     schedd = htcondor.Schedd()
-
-#     submit_result = schedd.submit(hostname_job, count=1)  # submit the job
-
-#     return {"cluster": str(submit_result.cluster())}
-
-
 @app.route('/hostname/<count>', methods=['GET', 'POST'])
 def hostname_count(count):
     hostname_job = htcondor.Submit({
@@ -80,22 +57,11 @@ def submit():
                                                       "request_memory",
                                                       "request_disk"]]
     if sum(has_keys) != 7:
-        return "False"
+        return {"cluster": "False"}
 
-    hostname_job = htcondor.Submit({
-        "executable": "/bin/hostname",  # the program to run on the execute node
-        # anything the job prints to standard output will end up in this file
-        "output": "/home/submituser/jobs/hostname/outputs/hostname.$(Cluster).$(Process).out",
-        # anything the job prints to standard error will end up in this file
-        "error": "/home/submituser/jobs/hostname/outputs/hostname.$(Cluster).$(Process).err",
-        # this file will contain a record of what happened to the job
-        "log": "/home/submituser/jobs/hostname/log/hostname.$(Cluster).$(Process).log",
-        "request_cpus": "1",            # how many CPU cores we want
-        "request_memory": "128MB",      # how much memory we want
-        "request_disk": "128MB",        # how much disk space we want
-    })
+    job = htcondor.Submit(content)
     schedd = htcondor.Schedd()
+    count = int(content.get("count", 1))
+    submit_result = schedd.submit(job, count=count)  # submit the job
 
-    submit_result = schedd.submit(hostname_job, count=1)  # submit the job
-
-    return {"cluster": str(submit_result.cluster())}
+    return {"cluster": str(submit_result.cluster()), "submit": str(job)}
