@@ -65,7 +65,7 @@ UID_DOMAIN = $(HOSTNAME)
 USE_CCB = True
 CCB_ADDRESS = $(CONDOR_HOST)
 
-DAEMON_LIST = MASTER, STARTD
+DAEMON_LIST = MASTER, STARTD, SHARED_PORT
 
 QUEUE_ALL_USERS_TRUSTED = True
 
@@ -79,9 +79,11 @@ use feature:PartitionableSlot
 USE_SHARED_PORT = True
 
 LOCAL_DIR = /global/cscratch1/sd/{USERNAME}/condor/$(HOSTNAME)
+# For perlmutter change this
+# LOCAL_DIR = /pscratch/sd/{FIRSTLETTER}/{USERNAME}/condor/$(HOSTNAME)
 RELEASE_DIR = /global/common/software/m3792/htcondor
 
-SEC_PASSWORD_FILE = /global/homes/t/{USERNAME}/.condor/{PASSWORDFILE}
+SEC_PASSWORD_FILE = /global/homes/{FIRSTLETTER}/{USERNAME}/.condor/{PASSWORDFILE}
 SEC_DEFAULT_AUTHENTICATION_METHODS = PASSWORD, FS
 
 ALLOW_READ = 128.55.*, 10.*
@@ -99,7 +101,7 @@ SCHEDD_DEBUG = D_FULLDEBUG
 if __name__ == '__main__':
     env_vars = {key: os.environ.get(key)
                 for key in ["USERNAME", "PORT", "HOSTNAME", "PASSWORDFILE"]}
-
+    env_vars["FIRSTLETTER"] = env_vars["USERNAME"][0]
     # Prints a file to be copy/pasted into a config file for cori
     print(cori_conf.format(**env_vars))
 

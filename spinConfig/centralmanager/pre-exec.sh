@@ -4,9 +4,11 @@
 rm -rf /etc/condor/config.d/*
 
 # If variable is set and the file does not exist make a new "Random" password
-if [[ ! -f "${PASSWORDFILE}" ]]; then
-    uuidgen -r | sed 's/-//g' >> ${PASSWORDFILE}
-    cat ${PASSWORDFILE}
+if [[ ! -f "/etc/condor/passwords.d/${PASSWORDFILE}" ]]; then
+    uuidgen -r | sed 's/-//g' > /etc/condor/passwords.d/${PASSWORDFILE}
+    cp /etc/condor/passwords.d/${PASSWORDFILE} /app/${PASSWORDFILE}
+    chown submituser:submituser /app/${PASSWORDFILE}
+    cat /etc/condor/passwords.d/${PASSWORDFILE} 
 fi
 
 # Write our new configs from environment

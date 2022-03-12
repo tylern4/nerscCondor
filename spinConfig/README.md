@@ -1,7 +1,9 @@
 # Running HTCondor in spin at NERSC
 
+To create a new instance of HTCondor working in spin at nersc you can follow along with the spinup user guide with some changes to the configuration shows below.
+
 ## Docker image
-Strat by building the central manager image from the [Dockerfile](centralmanager/Dockerfile), this includes a very basic flask app template for sumbmitting work to a rest api.
+The first step is to build the central manager image from the [Dockerfile](centralmanager/Dockerfile), this includes a very basic flask app template for sumbmitting work to a rest api. A working image and is available on dockerhub as `tylern4/condor:centralmanager`. 
 
 ## Ports
 Setup the ports needed for comunicating with htcondor and the submit rest server. You can omit the submit rest server port if you are not planning to use it for submissions. You can also change the `Publish the container port` for htcondor to any other port open to non-http services on spin, just make sure to also include the change in your environment variable configurations.
@@ -18,7 +20,7 @@ Setup the ports needed for comunicating with htcondor and the submit rest server
 These evironment varibles will be used to create the configuration files for htcondor on startup. It also prints a configuration to the logs to be used when setting up a machine on cori. Replace the values with 
 
 ```
-USERNAME=nerscuser
+USERNAME=nerscusername
 PORT=5432
 PASSWORDFILE=spin.password
 HOSTNAME=<workload name>-loadbalencer.<namespace>.<cluster>.svc.spin.nersc.org
@@ -33,9 +35,9 @@ There are a few nfs-client volumes to add to the spin configuration in order to 
 Setup a password file for the condor pool, following the instructions in the spinup workshop:
 
 1. Create a secret
-Select Resources > Secrets and click Add Secrets.
-Select: Available to a single namespace
-Select the namespace in the drop down
+    1. Select Resources > Secrets and click Add Secrets.
+    2. Select: Available to a single namespace
+    3. Select the namespace in the drop down
 
 2. Set Values
 ```

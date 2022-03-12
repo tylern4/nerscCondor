@@ -3,13 +3,15 @@ FROM htcondor/mini:$VERSION
 ENV VERSION=$VERSION
 
 # Default envs 
-ENV USER=docker \
+ENV USERNAME=docker \
     PORT=9618 \
     HOSTNAME=0.0.0.0 \
-    PASSWORDFILE=/etc/condor/password.d/POOL
+    PASSWORDFILE=spin.password
 
 COPY src /app
 WORKDIR /app
+
+RUN pip3 install --upgrade pip && pip3 install setuptools-rust
 RUN pip3 install -r requirements.txt
 
 COPY pre-exec.sh /root/config/pre-exec.sh
