@@ -112,3 +112,5 @@ dmypy.json
 
 # Pyre type checker
 .pyre/
+
+spinConfig/centralmanager/src/spin.password

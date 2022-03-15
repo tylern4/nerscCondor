@@ -14,6 +14,7 @@ app = Flask(__name__)
 if os.environ.get("PASSWORDFILE") is not None:
     with open(f'/app/{os.environ.get("PASSWORDFILE")}', 'r') as f:
         auth = f.read().rstrip("\n")
+        print(f"Auth: {auth}", flush=True)
 else:
     auth = None
 
@@ -74,7 +75,7 @@ def worker(site):
     if request.headers.get('Auth') != auth:
         return f"Incorect Auth"
 
-    script = """#!/bin/bash
+    script = """#!/bin/bash -l
 #SBATCH -N 1
 #SBATCH -q debug
 #SBATCH -C haswell
@@ -86,8 +87,10 @@ def worker(site):
 #SBATCH -e slurm-%j.err
 #SBATCH -o slurm-%j.out
 
+echo "RUNNING!!"
 export CONDOR_INSTALL=/global/common/software/m3792/htcondor
 export PATH=$CONDOR_INSTALL/bin:$CONDOR_INSTALL/sbin:$PATH
+module load python
 
 /global/project/projectdirs/m3792/tylern/local/bin/pagurus --user $USER --outfile $SCRATCH/pagurus-outputs/stats_$(date +%h_%d_%Y_%H.%M)_$SLURM_JOB_ID.csv &
 export PID=$!
@@ -98,21 +101,15 @@ mkdir -p $SCRATCH/condor/$(hostname)/log
 mkdir -p $SCRATCH/condor/$(hostname)/execute
 mkdir -p $SCRATCH/condor/$(hostname)/spool
 mkdir -p $SCRATCH/condor/$(hostname)/log/daemon_sock
-chgrp -R tylern $SCRATCH/condor/$(hostname)
-chmod o+rx $SCRATCH/condor/$(hostname)/spool
-chmod o+rx $SCRATCH/condor/$(hostname)/log
 
-export CONDOR_CONFIG=$SLURM_SUBMIT_DIR/condor_config.glidein.cori
+export CONDOR_CONFIG=/global/homes/t/tylern/spin_condor/condor_config.glidein.cori
 echo $CONDOR_CONFIG
-
+echo "Starting condor_master"
 condor_master
 
-# Submit 5000 hostnames as a test
-curl -H 'Content-Type: application/json' -d '{"error":"$(Cluster).$(Process).err","executable":"/bin/hostname","log":"$(Cluster).$(Process).log","output":"$(Cluster).$(Process).out","request_cpus":"1","request_disk":"1024MB","request_memory":"1024MB", "count": "5000"}' centralmanager-loadbalancer.htcondor.production.svc.spin.nersc.org:8008/submit
-
 sleep 3600
-
 kill $PID
+
     """
     if site == 'cori':
         ret = sfapi.post_job(site=site, script=script, isPath=False)
