@@ -1,4 +1,5 @@
 from ast import Try
+from asyncio.log import logger
 import htcondor
 import classad
 import os
@@ -7,6 +8,24 @@ from pathlib import Path
 
 
 from flask import Flask, request, jsonify
+from logging.config import dictConfig
+
+dictConfig({
+    'version': 1,
+    'formatters': {'default': {
+        'format': '[%(asctime)s] [%(levelname)s] %(message)s',
+    }},
+    'handlers': {'wsgi': {
+        'class': 'logging.StreamHandler',
+        'stream': 'ext://flask.logging.wsgi_errors_stream',
+        'formatter': 'default'
+    }},
+    'root': {
+        'level': 'INFO',
+        'handlers': ['wsgi']
+    }
+})
+
 app = Flask(__name__)
 
 # NOTE: Not a secure way to do this
@@ -14,7 +33,8 @@ app = Flask(__name__)
 if os.environ.get("PASSWORDFILE") is not None:
     with open(f'/app/{os.environ.get("PASSWORDFILE")}', 'r') as f:
         auth = f.read().rstrip("\n")
-        print(f"Auth: {auth}", flush=True)
+        app.logger.info(f"Auth: {auth}")
+
 else:
     auth = None
 
@@ -30,12 +50,11 @@ def check_file_and_open(file_path: str = "") -> str:
 
 try:
     pem = list(Path('/home/submituser/.superfacility').glob('*.pem'))
-
     if len(pem) > 0:
         clientid = str(pem[0]).split("/")[-1][:-4]
         private = check_file_and_open(str(pem[0]))
         sfapi = SuperfacilityAPI(clientid, private)
-except:
+except Exception as e:
     sfapi = SuperfacilityAPI(None, None)
 
 
@@ -80,39 +99,49 @@ def worker(site):
 #SBATCH -q debug
 #SBATCH -C haswell
 #SBATCH -A nstaff
-#SBATCH -t 00:30:00
+#SBATCH -t 00:10:00
 #SBATCH --job-name=condor_worker
 #SBATCH --exclusive
 
-#SBATCH -e slurm-%j.err
-#SBATCH -o slurm-%j.out
+#SBATCH -e /global/homes/t/tylern/spin_condor/outputs/%j.err
+#SBATCH -o /global/homes/t/tylern/spin_condor/outputs/%j.out
 
-echo "RUNNING!!"
-export CONDOR_INSTALL=/global/common/software/m3792/htcondor
-export PATH=$CONDOR_INSTALL/bin:$CONDOR_INSTALL/sbin:$PATH
-module load python
 
-/global/project/projectdirs/m3792/tylern/local/bin/pagurus --user $USER --outfile $SCRATCH/pagurus-outputs/stats_$(date +%h_%d_%Y_%H.%M)_$SLURM_JOB_ID.csv &
-export PID=$!
-sleep 1
+cleanup ()
+{
+    echo $(date)": got the signal "
+    kill $(ps aux | grep -v grep | grep -i condor | awk '{print $2}')
+    kill $PID
+    exit
+}
+
+trap cleanup SIGINT
 
 rm -rf $SCRATCH/condor/$(hostname)
+
+export CONDOR_INSTALL=/global/common/software/m3792/htcondor
+
+export PATH=$CONDOR_INSTALL/bin:$CONDOR_INSTALL/sbin:$PATH
+
 mkdir -p $SCRATCH/condor/$(hostname)/log
 mkdir -p $SCRATCH/condor/$(hostname)/execute
 mkdir -p $SCRATCH/condor/$(hostname)/spool
 mkdir -p $SCRATCH/condor/$(hostname)/log/daemon_sock
 
 export CONDOR_CONFIG=/global/homes/t/tylern/spin_condor/condor_config.glidein.cori
+
 echo $CONDOR_CONFIG
-echo "Starting condor_master"
+
 condor_master
 
-sleep 3600
-kill $PID
-
+sleep 7000
     """
     if site == 'cori':
         ret = sfapi.post_job(site=site, script=script, isPath=False)
+    elif site == 'coripath':
+        ret = sfapi.post_job(site='cori', script='/global/homes/t/tylern/spin_condor/worker.cori.job', isPath=True)
+    else:
+        return "Not a Valid Site"
     try:
         return repr(ret['jobid'])
     except Exception as e:
@@ -195,3 +224,19 @@ def projects():
         return repr(ret)
     except Exception as e:
         return "Error " + repr(e)
+
+
+@app.route('/condorq', methods=['GET', 'POST'])
+def condorq():
+    queries = []
+    coll_query = htcondor.Collector().locateAll(htcondor.DaemonTypes.Schedd)
+    for schedd_ad in coll_query:
+        schedd_obj = htcondor.Schedd(schedd_ad)
+        queries.append(schedd_obj.xquery())
+    job_counts = {}
+    for query in htcondor.poll(queries):
+        schedd_name = query.tag()
+        job_counts.setdefault(schedd_name, 0)
+        x = query.nextAdsNonBlocking()
+
+    return str(x[0])
