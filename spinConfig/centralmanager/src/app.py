@@ -1,5 +1,6 @@
 from ast import Try
 from asyncio.log import logger
+import uuid
 import htcondor
 import classad
 import os
@@ -87,6 +88,46 @@ def slurm_status(site=None):
     return repr(ret)
 
 
+def cleandict(content):
+
+    if type(content) is dict:
+        for key in content.keys():
+            c = str(content[key])
+            c = c.split(" ")[0]
+            c = c.split(";")[0]
+            content[key] = c
+    else:
+        content = {}
+
+    return content
+
+
+def time_to_seconds(intime):
+    # split off days first
+    intime = intime.split("-")
+    days = int(intime[0]) if len(intime) > 1 else 0
+
+    # split time into HH:MM:SS
+    intime = intime[-1].split(":")
+
+    time_bits = {0: 1, 1: 60, 2: 60*60, 3: 60*60*24}
+    total = 0
+    # Run in reverse becasue we will always
+    # have seconds and not always hours
+    # 0 -> sec
+    # 1 -> min
+    # 2 -> hrs.
+    # 3 -> days.
+    for i, t in enumerate(intime[::-1]):
+        total += (time_bits[i]*int(t))
+
+    if days > 0:
+        total += (time_bits[3]*int(days))
+
+    # Return total seconds
+    return total
+
+
 @app.route('/worker/<site>', methods=['GET', 'POST'])
 def worker(site):
     # Super simple to auth
@@ -94,52 +135,67 @@ def worker(site):
     if request.headers.get('Auth') != auth:
         return f"Incorect Auth"
 
-    script = """#!/bin/bash -l
-#SBATCH -N 1
+    content = cleandict(request.get_json(silent=True))
+
+    default_content = {
+        "time": "0-00:10:00",
+        "queue": "debug",
+        "nnodes": "2",
+        "constraint": "haswell",
+        "account": "nstaff",
+        "jobname": "condor_worker",
+    }
+
+    for key, value in default_content.items():
+        content[key] = content[key] if key in content else default_content[key]
+
+#     script_cori = f"""#!/bin/bash -l
+# #SBATCH -N {content['nnodes']}
+# #SBATCH -q {content['queue']}
+# #SBATCH -C {content['constraint']}
+# #SBATCH -A {content['account']}
+# #SBATCH -t {content['time']}
+# #SBATCH --job-name={content['jobname']}
+# #SBATCH --exclusive
+
+# """
+
+    script_cori = '''#!/bin/bash -l
+#SBATCH -N 2
 #SBATCH -q debug
 #SBATCH -C haswell
 #SBATCH -A nstaff
-#SBATCH -t 00:10:00
+#SBATCH -t 00:05:00
 #SBATCH --job-name=condor_worker
 #SBATCH --exclusive
 
-#SBATCH -e /global/homes/t/tylern/spin_condor/outputs/%j.err
-#SBATCH -o /global/homes/t/tylern/spin_condor/outputs/%j.out
+#SBATCH -e /global/homes/t/tylern/spin_condor/outputs/multinode_%j.err
+#SBATCH -o /global/homes/t/tylern/spin_condor/outputs/multinode_%j.out
 
+cd /global/homes/t/tylern/spin_condor
 
-cleanup ()
-{
-    echo $(date)": got the signal "
-    kill $(ps aux | grep -v grep | grep -i condor | awk '{print $2}')
-    kill $PID
-    exit
-}
+for node in $(scontrol show hostnames ${SLURM_NODELIST}); do
+    echo $node
+    srun -N 1 -n 1 -c 1 --gres=craynetwork:1 --overlap start_worker.sh &
+    sleep 2;
+done;
 
-trap cleanup SIGINT
+sleep 200
 
-rm -rf $SCRATCH/condor/$(hostname)
+echo $(date)": got the signal "
+for node in $(scontrol show hostnames ${SLURM_NODELIST}); do
+    echo $node
+    srun -N 1 -n 1 -c 1 --gres=craynetwork:1 --overlap stop_worker.sh &
+    sleep 2;
+done;
+exit'''
 
-export CONDOR_INSTALL=/global/common/software/m3792/htcondor
-
-export PATH=$CONDOR_INSTALL/bin:$CONDOR_INSTALL/sbin:$PATH
-
-mkdir -p $SCRATCH/condor/$(hostname)/log
-mkdir -p $SCRATCH/condor/$(hostname)/execute
-mkdir -p $SCRATCH/condor/$(hostname)/spool
-mkdir -p $SCRATCH/condor/$(hostname)/log/daemon_sock
-
-export CONDOR_CONFIG=/global/homes/t/tylern/spin_condor/condor_config.glidein.cori
-
-echo $CONDOR_CONFIG
-
-condor_master
-
-sleep 7000
-    """
     if site == 'cori':
-        ret = sfapi.post_job(site=site, script=script, isPath=False)
+        ret = sfapi.post_job(site=site, script=script_cori, isPath=False)
     elif site == 'coripath':
         ret = sfapi.post_job(site='cori', script='/global/homes/t/tylern/spin_condor/worker.cori.job', isPath=True)
+    elif site == 'perlmutter':
+        ret = sfapi.post_job(site=site, script='/global/homes/t/tylern/spin_condor/worker.perlmutter.job', isPath=True)
     else:
         return "Not a Valid Site"
     try:
