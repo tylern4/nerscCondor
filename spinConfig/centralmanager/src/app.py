@@ -1,15 +1,22 @@
+import pandas as pd
+from subprocess import Popen, call, PIPE
+
+from typing import Dict
 from ast import Try
 from asyncio.log import logger
 import uuid
 import htcondor
 import classad
 import os
-from SuperfacilityAPI import SuperfacilityAPI
+from SuperfacilityAPI import SuperfacilityAPI, SuperfacilityAccessToken
 from pathlib import Path
 
 
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, make_response
 from logging.config import dictConfig
+from apscheduler.schedulers.background import BackgroundScheduler
+from flask import Flask
+
 
 dictConfig({
     'version': 1,
@@ -52,11 +59,12 @@ def check_file_and_open(file_path: str = "") -> str:
 try:
     pem = list(Path('/home/submituser/.superfacility').glob('*.pem'))
     if len(pem) > 0:
-        clientid = str(pem[0]).split("/")[-1][:-4]
-        private = check_file_and_open(str(pem[0]))
-        sfapi = SuperfacilityAPI(clientid, private)
+        access_token = SuperfacilityAccessToken(key_path=pem[0])
+        sfapi = SuperfacilityAPI(token=access_token.token)
+
 except Exception as e:
-    sfapi = SuperfacilityAPI(None, None)
+    app.logger.error(f"{type(e).__name__} : {e}")
+    sfapi = SuperfacilityAPI()
 
 
 @app.route('/', methods=['GET'])
@@ -67,6 +75,7 @@ def read_root():
 
 @app.route('/status/<site>', methods=['GET', 'POST'])
 def slurm_status(site=None):
+    app.logger.info(f"Getting status of {site}")
     # Super simple to auth
     # NOTE: Definitly not secure
     if request.headers.get('Auth') != auth:
@@ -85,7 +94,10 @@ def slurm_status(site=None):
         ret = [sfapi.status(site) for site in site.split(",")]
 
     ret = [oj for oj in ret if oj['description'] != 'Retired']
-    return repr(ret)
+
+    response = make_response(jsonify(ret), 200)
+    response.headers["Content-Type"] = "application/json"
+    return response
 
 
 def cleandict(content):
@@ -137,76 +149,18 @@ def worker(site):
 
     content = cleandict(request.get_json(silent=True))
 
-    default_content = {
-        "time": "0-00:10:00",
-        "queue": "debug",
-        "nnodes": "2",
-        "constraint": "haswell",
-        "account": "nstaff",
-        "jobname": "condor_worker",
-    }
-
-    for key, value in default_content.items():
-        content[key] = content[key] if key in content else default_content[key]
-
-#     script_cori = f"""#!/bin/bash -l
-# #SBATCH -N {content['nnodes']}
-# #SBATCH -q {content['queue']}
-# #SBATCH -C {content['constraint']}
-# #SBATCH -A {content['account']}
-# #SBATCH -t {content['time']}
-# #SBATCH --job-name={content['jobname']}
-# #SBATCH --exclusive
-
-# """
-
-    script_cori = '''#!/bin/bash -l
-#SBATCH -N 2
-#SBATCH -q debug
-#SBATCH -C haswell
-#SBATCH -A nstaff
-#SBATCH -t 00:05:00
-#SBATCH --job-name=condor_worker
-#SBATCH --exclusive
-
-#SBATCH -e /global/homes/t/tylern/spin_condor/outputs/multinode_%j.err
-#SBATCH -o /global/homes/t/tylern/spin_condor/outputs/multinode_%j.out
-
-cd /global/homes/t/tylern/spin_condor
-
-for node in $(scontrol show hostnames ${SLURM_NODELIST}); do
-    echo $node
-    srun -N 1 -n 1 -c 1 --gres=craynetwork:1 --overlap start_worker.sh &
-    sleep 2;
-done;
-
-sleep 200
-
-echo $(date)": got the signal "
-for node in $(scontrol show hostnames ${SLURM_NODELIST}); do
-    echo $node
-    srun -N 1 -n 1 -c 1 --gres=craynetwork:1 --overlap stop_worker.sh &
-    sleep 2;
-done;
-exit'''
-
     if site == 'cori':
-        ret = sfapi.post_job(site=site, script=script_cori, isPath=False)
-    elif site == 'coripath':
-        ret = sfapi.post_job(site='cori', script='/global/homes/t/tylern/spin_condor/worker.cori.job', isPath=True)
+        ret = sfapi.post_job(access_token.token,
+                             site='cori', script='/global/homes/t/tylern/spin_condor/worker.cori.job', isPath=True)
     elif site == 'perlmutter':
-        ret = sfapi.post_job(site=site, script='/global/homes/t/tylern/spin_condor/worker.perlmutter.job', isPath=True)
+        ret = sfapi.post_job(access_token.token,
+                             site=site, script='/global/homes/t/tylern/spin_condor/worker.perlmutter.job', isPath=True)
     else:
         return "Not a Valid Site"
     try:
         return repr(ret['jobid'])
     except Exception as e:
         return repr(e)
-
-
-@app.route('/token', methods=['GET', 'POST'])
-def token():
-    return str(sfapi.token)
 
 
 @app.route('/hostname/<count>', methods=['GET', 'POST'])
@@ -230,7 +184,8 @@ def hostname_count(count):
     # get the Python representation of the scheduler
     schedd = htcondor.Schedd()
 
-    submit_result = schedd.submit(hostname_job, count=int(count))  # submit the job
+    submit_result = schedd.submit(
+        hostname_job, count=int(count))  # submit the job
 
     return {"cluster": str(submit_result.cluster()), "count": count}
 
@@ -275,7 +230,7 @@ def projects():
     if request.headers.get('Auth') != auth:
         return f"Incorect Auth"
 
-    ret = sfapi.projects()
+    ret = sfapi.projects(token=access_token.token)
     try:
         return repr(ret)
     except Exception as e:
@@ -284,15 +239,344 @@ def projects():
 
 @app.route('/condorq', methods=['GET', 'POST'])
 def condorq():
-    queries = []
-    coll_query = htcondor.Collector().locateAll(htcondor.DaemonTypes.Schedd)
-    for schedd_ad in coll_query:
-        schedd_obj = htcondor.Schedd(schedd_ad)
-        queries.append(schedd_obj.xquery())
-    job_counts = {}
-    for query in htcondor.poll(queries):
-        schedd_name = query.tag()
-        job_counts.setdefault(schedd_name, 0)
-        x = query.nextAdsNonBlocking()
+    try:
+        queries = []
+        coll_query = htcondor.Collector().locateAll(htcondor.DaemonTypes.Schedd)
+        for schedd_ad in coll_query:
+            schedd_obj = htcondor.Schedd(schedd_ad)
+            queries.append(schedd_obj.xquery())
+        job_counts = {}
+        for query in htcondor.poll(queries):
+            schedd_name = query.tag()
+            job_counts.setdefault(schedd_name, 0)
+            x = query.nextAdsNonBlocking()
 
-    return str(x[0])
+        return str(x[0])
+    except Exception as e:
+        response = make_response(jsonify({type(e).__name__: repr(e)}), 500)
+        return response
+
+
+def run_sh_command(cmd, live=True, log=None,
+                   show_stdout=True):
+    """
+    Run a command, catch stdout and stderr and exit_code
+    :param cmd:
+    :param live: live (boolean, default True - don't run the command but pretend we did)
+    :param log:
+    :param run_time: flag to print elapsed time as log
+    :param show_stdout: flag to show stdout or not
+    :param timeout_sec: timeout to terminate the specified command
+    :return:
+
+    >>> run_sh_command("ls -al", live=False)
+    ("Not live: cmd = 'ls -al'", None, 0)
+    """
+    std_out = None
+    std_err = None
+    exit_code = None
+
+    p = Popen(cmd, stdout=PIPE, stderr=PIPE, shell=True)
+
+    try:
+        std_out, std_err = p.communicate()
+        if type(std_out) is bytes:
+            std_out = std_out.decode()
+        if type(std_err) is bytes:
+            std_err = std_err.decode()
+        if show_stdout:
+            print(std_out)  # for printing slurm job id
+        exit_code = p.returncode
+    except:
+        return None, None, -1
+
+    if type(std_out) is bytes:
+        std_out = std_out.decode()
+    if type(std_err) is bytes:
+        std_err = std_err.decode()
+
+    return std_out, std_err, exit_code
+
+
+#
+# System vars, dirs, and cmds
+#
+user_name = "tylern"
+# condor_root = "/global/cfs/cdirs/jaws/condor"
+condor_root = ".."
+
+normal_worker_q = f"{condor_root}/condor_worker_normal.job"
+highmem_worker_jgishared_q = f"{condor_root}/condor_worker_highmem_jgi_shared.job"
+highmem_worker_jgilarge_q = f"{condor_root}/condor_worker_highmem_jgi_large.job"
+condor_q_cmd = "condor_q -af ClusterId RequestMemory RequestCpus JobStatus"
+
+
+###################### TODO : These should all be created from a configuration file at some point ######################
+MIN_POOL = 0
+MAX_POOL = 10
+MAX_SUBMIT_SIZE = 10
+
+worker_sizes = {
+    "regular_cpu": 64,
+    "regular_mem": 128,
+    "large_cpu": 72,
+    "large_mem": 1450,
+    "perlmutter_cpu": 256,
+    "perlmutter_mem": 512,
+}
+
+default_form = {}
+default_form["regular"] = {
+    "site": "cori",
+    "qos": "genepool_special",
+    "constraint": "haswell",
+    "account": "fungalp",
+    "time": "06:00:00",
+    "cluster": "cori",
+    "script_location": ".",
+}
+default_form["large"] = {
+    "site": "cori",
+    "qos": "exvivo",
+    "constraint": "skylake",
+    "account": "fungalp",
+    "time": "06:00:00",
+    "cluster": "escori",
+    "script_location": ".",
+}
+
+# Extra partition arguments for cori
+squeue_args = {}
+#squeue_args["cori"] = "--clusters=all -p genepool,genepool_shared,exvivo,exvivo_shared"
+squeue_args["cori"] = "--clusters=all"
+squeue_args["jgi"] = "-p lr3"
+squeue_args["tahoma"] = ""
+############### TODO : These should all be created from a configuration file at some point ###############
+
+
+def get_current_slurm_workers(site: str = "cori") -> Dict:
+    squeue_cmd = f'squeue --format="%.18i %D %.24P %.100j %.20u %.10T %S %e" {squeue_args[site]}'
+    _stdout = sfapi.custom_cmd(token=access_token.token, cmd=squeue_cmd)
+    _stdout = _stdout['output']
+
+    # Gets jobs from output
+    jobs = [job.split() for job in _stdout.split("\n") if len(job.split()) > 3]
+    # Get column names from list
+    columns = jobs[0]
+    num_cols = len(columns)
+    # Remove all instances of column names from list of jobs
+    jobs = [job for job in jobs if job != columns and len(job) == num_cols]
+
+    # Make dataframe to query with
+    df = pd.DataFrame(jobs, columns=columns)
+    df["NODES"] = df["NODES"].astype(int)
+
+    # replace time with value and convert times to datetime
+    for time_col in ["START_TIME", "END_TIME"]:
+        df.loc[df[time_col] == "N/A", time_col] = "2000-01-01T00:00:00"
+        df[time_col] = pd.to_datetime(df[time_col])
+
+    df["TIME_LEFT"] = df["END_TIME"] - df["START_TIME"]
+    user_status = {}
+
+    mask_user = df["USER"] == user_name
+    mask_pending = df["STATE"] == "PENDING"
+    mask_condor = df["NAME"].str.contains("condor")
+
+    mask_user = mask_user & mask_condor
+
+    # Each of these selects for a certian type of node based on a set of masks
+    # Add the number of nodes to get how many are in each catogory
+    user_status["regular_pending"] = sum(
+        df[mask_user & mask_pending].NODES
+    )
+    user_status["regular_running"] = sum(
+        df[mask_user & ~mask_pending].NODES
+    )
+
+    user_status["large_pending"] = sum(
+        df[mask_user & mask_pending].NODES
+    )
+    user_status["large_running"] = sum(
+        df[mask_user & ~mask_pending].NODES
+    )
+
+    user_status["other_large_pending"] = sum(
+        df[~mask_user & mask_pending].NODES
+    )
+    user_status["other_large_running"] = sum(
+        df[~mask_user & ~mask_pending].NODES
+    )
+
+    return user_status
+
+
+def get_condor_job_queue() -> pd.DataFrame:
+    _stdout, se, ec = run_sh_command(condor_q_cmd, show_stdout=False)
+    if ec != 0:
+        print(f"ERROR: failed to execute condor_q command: {condor_q_cmd}")
+        exit(1)
+
+    # split outputs into
+    outputs = _stdout.split("\n")
+    columns = ["ClusterId", "RequestMemory", "RequestCpus", "JobStatus"]
+
+    queued_jobs = [job.split() for job in outputs]
+    queued_jobs = [q for q in queued_jobs if len(q) != 0]
+    df = pd.DataFrame(queued_jobs, columns=columns)
+    df["RequestMemory"] = df["RequestMemory"].astype(float)/1024
+    df["JobStatus"] = df["JobStatus"].astype(int)
+    df["RequestMemory"] = df["RequestMemory"].astype(float)
+    df["RequestCpus"] = df["RequestCpus"].astype(float)
+
+    return df
+
+
+def determine_condor_job_sizes(df: pd.DataFrame):
+    df["mem_bin"] = pd.cut(
+        df["RequestMemory"],
+        bins=[0, worker_sizes["regular_mem"],
+              worker_sizes["large_mem"], 10_000_000],
+        labels=["regular", "large", "over-mem"],
+    )
+    df["cpu_bin"] = pd.cut(
+        df["RequestCpus"],
+        bins=[0, worker_sizes["regular_cpu"],
+              worker_sizes["large_cpu"], 10_000_000],
+        labels=["regular", "large", "over-cpu"],
+    )
+
+    condor_q_status = {}
+    mask_running_status = df["JobStatus"].astype(int) == 2
+    mask_idle_status = df["JobStatus"].astype(int) == 1
+    mask_mem_regular = df["mem_bin"].str.contains("regular")
+    mask_mem_large = df["mem_bin"].str.contains("large")
+    mask_cpu_regular = df["cpu_bin"].str.contains("regular")
+    mask_cpu_large = df["cpu_bin"].str.contains("large")
+
+    mask_over = df["cpu_bin"].str.contains(
+        "over") | df["mem_bin"].str.contains("over")
+
+    mask_idle_regular = mask_mem_regular & mask_cpu_regular & mask_idle_status
+    mask_idle_large = (mask_mem_large | mask_cpu_large) & mask_idle_status
+
+    condor_q_status["idle_regular"] = sum(mask_idle_regular)
+    condor_q_status["running_regular"] = sum(
+        mask_mem_regular & mask_cpu_regular & mask_running_status
+    )
+    condor_q_status["idle_large"] = sum(mask_idle_large)
+    condor_q_status["running_large"] = sum(
+        (mask_mem_large | mask_cpu_large) & mask_running_status
+    )
+    condor_q_status["hold_and_impossible"] = sum(mask_over)
+
+    condor_q_status["regular_cpu_needed"] = sum(
+        df[mask_idle_regular].RequestCpus)
+    condor_q_status["regular_mem_needed"] = sum(
+        df[mask_idle_regular].RequestMemory)
+
+    condor_q_status["large_cpu_needed"] = sum(df[mask_idle_large].RequestCpus)
+    condor_q_status["large_mem_needed"] = sum(
+        df[mask_idle_large].RequestMemory)
+
+    return condor_q_status
+
+
+def need_new_nodes(condor_job_queue: Dict, slurm_workers: Dict, machine: Dict) -> Dict:
+    workers_needed = 0
+
+    # If we need more than a node add a node (or more)
+    if (
+        condor_job_queue[f"{machine}_cpu_needed"] > worker_sizes[f"{machine}_cpu"]
+        or condor_job_queue[f"{machine}_mem_needed"] > worker_sizes[f"{machine}_mem"]
+    ):
+        # Calculate what we need
+        _cpu = (
+            condor_job_queue[f"{machine}_cpu_needed"] // worker_sizes[f"{machine}_cpu"]
+        )
+        _mem = (
+            condor_job_queue[f"{machine}_mem_needed"] // worker_sizes[f"{machine}_mem"]
+        )
+        workers_needed += max(_cpu, _mem)
+
+    # Total number running and pending to run (i.e. worker pool)
+    current_pool_size = (
+        slurm_workers[f"{machine}_pending"]
+        + slurm_workers[f"{machine}_running"]
+    )
+
+    # If workers_needed is higher than the pool we'll add the diference
+    # Else we don't need workers (add 0)
+    workers_needed = max(0, workers_needed - current_pool_size)
+
+    # If we have less running than the minimum we always need to add more
+    # Either add what we need from queue (workers_needed)
+    # Or what we're lacking in the pool (min - worker pool)
+    if current_pool_size < MIN_POOL:
+        workers_needed = max(MIN_POOL - current_pool_size, workers_needed)
+
+    # Check to make sure we don't go over the max pool size
+    if (workers_needed + current_pool_size) > MAX_POOL:
+        # Only add up to max pool and no more
+        workers_needed = MAX_POOL - current_pool_size
+
+    if workers_needed >= MAX_SUBMIT_SIZE:
+        workers_needed = MAX_SUBMIT_SIZE
+
+    return workers_needed
+
+
+def auto_worker(site):
+    if site == 'cori':
+        ret = sfapi.post_job(token=access_token.token,
+                             site='cori', script='/global/homes/t/tylern/spin_condor/worker.cori.job', isPath=True)
+    elif site == 'perlmutter':
+        ret = sfapi.post_job(token=access_token.token,
+                             site=site, script='/global/homes/t/tylern/spin_condor/worker.perlmutter.job', isPath=True)
+    else:
+        return "Not a Valid Site"
+    try:
+        return repr(ret['jobid'])
+    except Exception as e:
+        return repr(e)
+
+
+workers_needed = {}
+
+
+@app.route('/needed', methods=['GET', 'POST'])
+def rest_workers_needed():
+    # Super simple to auth
+    # NOTE: Definitly not secure
+    if request.headers.get('Auth') != auth:
+        app.logger.error(f"No Auth, not checking on getting new jobs")
+    else:
+        global workers_needed
+        workers_needed = run_workers_needed()
+
+    response = make_response(jsonify(workers_needed), 200)
+    return response
+
+
+def run_workers_needed():
+    condor_job_queue = determine_condor_job_sizes(get_condor_job_queue())
+    app.logger.info(condor_job_queue)
+    slurm_workers = get_current_slurm_workers()
+    app.logger.info(slurm_workers)
+    global workers_needed
+    workers_needed = {
+        "regular": need_new_nodes(condor_job_queue, slurm_workers, "regular"),
+        "large": need_new_nodes(condor_job_queue, slurm_workers, "large"),
+    }
+
+    app.logger.info(workers_needed)
+    if workers_needed['regular'] > 0:
+        jobid = auto_worker('cori')
+        app.logger.info(f'Starting job {jobid}')
+
+    return workers_needed
+
+
+sched = BackgroundScheduler(daemon=True)
+sched.add_job(run_workers_needed, 'interval', minutes=5,)
+sched.start()

@@ -1,6 +1,10 @@
-ARG VERSION=9.5-el7
+ARG VERSION=9.7-el7
 FROM htcondor/mini:$VERSION
 ENV VERSION=$VERSION
+
+RUN yum install -y vim zsh htop \
+    && yum clean all \
+    && rm -rf /var/cache/yum
 
 # Default envs 
 ENV USERNAME=docker \
@@ -18,6 +22,7 @@ WORKDIR /app
 
 RUN pip3 install --upgrade pip && pip3 install setuptools-rust
 RUN pip3 install -r requirements.txt
+RUN pip3 install git+https://github.com/tylern4/SuperfacilityConnector.git@main
 
 COPY --chown=submituser:submituser src /app
 RUN chown -R submituser:submituser /app
