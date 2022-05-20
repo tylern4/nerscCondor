@@ -44,9 +44,9 @@ There are a few nfs-client volumes to add to the spin configuration in order to 
 Setup a password file for the condor pool, following the instructions in the spinup workshop:
 
 1. Create a secret
-    1. Select Resources > Secrets and click Add Secrets.
-    2. Select: Available to a single namespace
-    3. Select the namespace in the drop down
+    - Select Resources > Secrets and click Add Secrets.
+    - Select: Available to a single namespace
+    - Select the namespace in the drop down
 
 2. Set Values
 ```
@@ -57,13 +57,11 @@ Value: <make-something-up>
 3. Click Save
 
 Add to
-1. Click on Resources > Workloads, open the ( ⋮ ) menu to the
-right of your workload, and select Edit.
+1. Click on Resources > Workloads, open the ( ⋮ ) menu to the right of your workload, and select Edit.
 2. Expand Volumes; click Add Volumes; select Use a Secret.
 3. From the Secret drop-down, choose your file name.
-4. Check Select Specific Keys; from the Key drop-down, choose
-password. Under Path, enter password.
-5. Set Mount Point to /etc/condor/passwords.d.
+4. Check Select Specific Keys; from the Key drop-down, choose password. Under Path, enter password.
+5. Set Mount Point to `/etc/condor/passwords.d`.
 6. Click Save. 
 
 ### Helpful
@@ -95,11 +93,11 @@ To view the htcondor read-only rest api you can add a load balancer to point to 
 1. Start in Resources > Workload
 2. Click Load Balancing, then Add Ingress
 3. Set these values
-Name: lb
-Namespace: <Namespace from previous exercise>
+    - Name: lb
+    - Namespace: <Namespace from previous exercise>
 4. Click Specify Hostname to use and add lb.<namespace>.development.svc.spin.nersc.org
-5. Scroll down to Target Backend (The Workload type is selected by default) & add these values
-Path: Leave blank
-Target: app
-Port: 8080
+5. Scroll down to Target Backend (The Workload type is selected by default) and add these values
+    - Path: Leave blank
+    - Target: app
+    - Port: 8080
 6. Click Save
