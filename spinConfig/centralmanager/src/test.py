@@ -1,5 +1,8 @@
+import time
+import htcondor
 import pandas as pd
 from subprocess import Popen, call, PIPE
+
 
 from typing import Dict
 from pathlib import Path
@@ -67,7 +70,8 @@ condor_root = ".."
 normal_worker_q = f"{condor_root}/condor_worker_normal.job"
 highmem_worker_jgishared_q = f"{condor_root}/condor_worker_highmem_jgi_shared.job"
 highmem_worker_jgilarge_q = f"{condor_root}/condor_worker_highmem_jgi_large.job"
-condor_q_cmd = "condor_q -af ClusterId RequestMemory RequestCpus JobStatus"
+wanted_columns = "ClusterId RequestMemory RequestCpus JobStatus NumRestarts QDate"
+condor_q_cmd = f"condor_q -af {wanted_columns}"
 
 
 ###################### TODO : These should all be created from a configuration file at some point ######################
@@ -184,7 +188,7 @@ def get_condor_job_queue() -> pd.DataFrame:
 
     # split outputs into
     outputs = _stdout.split("\n")
-    columns = ["ClusterId", "RequestMemory", "RequestCpus", "JobStatus"]
+    columns = wanted_columns.split()
 
     queued_jobs = [job.split() for job in outputs]
     queued_jobs = [q for q in queued_jobs if len(q) != 0]
@@ -193,6 +197,7 @@ def get_condor_job_queue() -> pd.DataFrame:
     df["JobStatus"] = df["JobStatus"].astype(int)
     df["RequestMemory"] = df["RequestMemory"].astype(float)
     df["RequestCpus"] = df["RequestCpus"].astype(float)
+    df["total_q_time"] = int(time.time()) - df["QDate"].astype(int)
 
     return df
 
@@ -289,5 +294,15 @@ def need_new_nodes(condor_job_queue: Dict, slurm_workers: Dict, machine: Dict) -
     return workers_needed
 
 
+def get_condor_job_queue2():
+    schedd = htcondor.Schedd()
+
+    queued_jobs = schedd.query()
+    df = pd.DataFrame(queued_jobs)
+    return print(queued_jobs[0])
+
+
 if __name__ == '__main__':
-    print(get_condor_job_queue())
+    condor_q = get_condor_job_queue()
+    print(determine_condor_job_sizes(condor_q))
+    # print(get_condor_job_queue2())

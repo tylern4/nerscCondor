@@ -1,4 +1,6 @@
+import math
 import pandas as pd
+import time
 from subprocess import Popen, call, PIPE
 
 from typing import Dict
@@ -154,7 +156,7 @@ def worker(site):
                              site='cori', script='/global/homes/t/tylern/spin_condor/worker.cori.job', isPath=True)
     elif site == 'perlmutter':
         ret = sfapi.post_job(access_token.token,
-                             site=site, script='/global/homes/t/tylern/spin_condor/worker.perlmutter.job', isPath=True)
+                             site=site, script='/global/homes/t/tylern/alvarez_condor/worker.perlmutter.ss11.job', isPath=True)
     else:
         return "Not a Valid Site"
     try:
@@ -240,18 +242,8 @@ def projects():
 @app.route('/condorq', methods=['GET', 'POST'])
 def condorq():
     try:
-        queries = []
-        coll_query = htcondor.Collector().locateAll(htcondor.DaemonTypes.Schedd)
-        for schedd_ad in coll_query:
-            schedd_obj = htcondor.Schedd(schedd_ad)
-            queries.append(schedd_obj.xquery())
-        job_counts = {}
-        for query in htcondor.poll(queries):
-            schedd_name = query.tag()
-            job_counts.setdefault(schedd_name, 0)
-            x = query.nextAdsNonBlocking()
-
-        return str(x[0])
+        condor_q = get_condor_job_queue()
+        return condor_q.to_html()
     except Exception as e:
         response = make_response(jsonify({type(e).__name__: repr(e)}), 500)
         return response
@@ -302,13 +294,10 @@ def run_sh_command(cmd, live=True, log=None,
 # System vars, dirs, and cmds
 #
 user_name = "tylern"
-# condor_root = "/global/cfs/cdirs/jaws/condor"
 condor_root = ".."
 
-normal_worker_q = f"{condor_root}/condor_worker_normal.job"
-highmem_worker_jgishared_q = f"{condor_root}/condor_worker_highmem_jgi_shared.job"
-highmem_worker_jgilarge_q = f"{condor_root}/condor_worker_highmem_jgi_large.job"
-condor_q_cmd = "condor_q -af ClusterId RequestMemory RequestCpus JobStatus"
+wanted_columns = "ClusterId RequestMemory RequestCpus CumulativeRemoteSysCpu CumulativeRemoteUserCpu JobStatus NumRestarts RemoteHost JobStartDate QDate"
+condor_q_cmd = f"condor_q -allusers -af {wanted_columns}"
 
 
 ###################### TODO : These should all be created from a configuration file at some point ######################
@@ -317,47 +306,31 @@ MAX_POOL = 10
 MAX_SUBMIT_SIZE = 10
 
 worker_sizes = {
-    "regular_cpu": 64,
-    "regular_mem": 128,
-    "large_cpu": 72,
-    "large_mem": 1450,
-    "perlmutter_cpu": 256,
-    "perlmutter_mem": 512,
-}
-
-default_form = {}
-default_form["regular"] = {
-    "site": "cori",
-    "qos": "genepool_special",
-    "constraint": "haswell",
-    "account": "fungalp",
-    "time": "06:00:00",
-    "cluster": "cori",
-    "script_location": ".",
-}
-default_form["large"] = {
-    "site": "cori",
-    "qos": "exvivo",
-    "constraint": "skylake",
-    "account": "fungalp",
-    "time": "06:00:00",
-    "cluster": "escori",
-    "script_location": ".",
+    "regular_cpu": 256,
+    "regular_mem": 512,
 }
 
 # Extra partition arguments for cori
 squeue_args = {}
 #squeue_args["cori"] = "--clusters=all -p genepool,genepool_shared,exvivo,exvivo_shared"
-squeue_args["cori"] = "--clusters=all"
-squeue_args["jgi"] = "-p lr3"
-squeue_args["tahoma"] = ""
+# squeue_args["cori"] = "--clusters=all"
+squeue_args["perlmutter"] = "--clusters=all"
 ############### TODO : These should all be created from a configuration file at some point ###############
 
 
-def get_current_slurm_workers(site: str = "cori") -> Dict:
+def get_current_slurm_workers(site: str = "perlmutter") -> Dict:
+    user_status = {}
     squeue_cmd = f'squeue --format="%.18i %D %.24P %.100j %.20u %.10T %S %e" {squeue_args[site]}'
-    _stdout = sfapi.custom_cmd(token=access_token.token, cmd=squeue_cmd)
-    _stdout = _stdout['output']
+
+    _stdout = sfapi.custom_cmd(
+        token=access_token.token, cmd=squeue_cmd, site=site)
+
+    try:
+        _stdout = _stdout['output']
+    except KeyError:
+        app.logger.error(
+            "No output from squeue, possbily due to maintenance?!")
+        return {"regular_pending": 0, "regular_running": 0}
 
     # Gets jobs from output
     jobs = [job.split() for job in _stdout.split("\n") if len(job.split()) > 3]
@@ -377,57 +350,60 @@ def get_current_slurm_workers(site: str = "cori") -> Dict:
         df[time_col] = pd.to_datetime(df[time_col])
 
     df["TIME_LEFT"] = df["END_TIME"] - df["START_TIME"]
-    user_status = {}
 
     mask_user = df["USER"] == user_name
     mask_pending = df["STATE"] == "PENDING"
+    mask_running = df["STATE"] == "RUNNING"
     mask_condor = df["NAME"].str.contains("condor")
 
     mask_user = mask_user & mask_condor
-
     # Each of these selects for a certian type of node based on a set of masks
     # Add the number of nodes to get how many are in each catogory
     user_status["regular_pending"] = sum(
         df[mask_user & mask_pending].NODES
     )
     user_status["regular_running"] = sum(
-        df[mask_user & ~mask_pending].NODES
-    )
-
-    user_status["large_pending"] = sum(
-        df[mask_user & mask_pending].NODES
-    )
-    user_status["large_running"] = sum(
-        df[mask_user & ~mask_pending].NODES
-    )
-
-    user_status["other_large_pending"] = sum(
-        df[~mask_user & mask_pending].NODES
-    )
-    user_status["other_large_running"] = sum(
-        df[~mask_user & ~mask_pending].NODES
+        df[mask_user & mask_running].NODES
     )
 
     return user_status
 
 
 def get_condor_job_queue() -> pd.DataFrame:
+    # Runs a condor_q autoformat to get the desired columns back
     _stdout, se, ec = run_sh_command(condor_q_cmd, show_stdout=False)
     if ec != 0:
         print(f"ERROR: failed to execute condor_q command: {condor_q_cmd}")
-        exit(1)
+        return None
 
-    # split outputs into
+    # split outputs by rows
     outputs = _stdout.split("\n")
-    columns = ["ClusterId", "RequestMemory", "RequestCpus", "JobStatus"]
 
+    # Get the column names from configuration
+    columns = wanted_columns.split()
+    # Split each row into columns
     queued_jobs = [job.split() for job in outputs]
+    # Removes columns with no values (Usually the last column)
     queued_jobs = [q for q in queued_jobs if len(q) != 0]
+
+    # Create a dataframe from the split outputs
     df = pd.DataFrame(queued_jobs, columns=columns)
-    df["RequestMemory"] = df["RequestMemory"].astype(float)/1024
+    # Change the type
+    df["RequestMemory"] = df["RequestMemory"].astype(int)
     df["JobStatus"] = df["JobStatus"].astype(int)
-    df["RequestMemory"] = df["RequestMemory"].astype(float)
+    df["RequestMemory"] = df["RequestMemory"].astype(float) / 1024
     df["RequestCpus"] = df["RequestCpus"].astype(float)
+    df["CumulativeRemoteSysCpu"] = df["CumulativeRemoteSysCpu"].astype(float)
+    df["CumulativeRemoteUserCpu"] = df["CumulativeRemoteUserCpu"].astype(float)
+
+    now = int(time.time())
+    df["JobStartDate"] = df["JobStartDate"].str.replace('undefined', str(now))
+    df["total_running_time"] = now - df["JobStartDate"].astype(int)
+    df["cpu_percentage"] = (((df['CumulativeRemoteSysCpu'] + df['CumulativeRemoteUserCpu']
+                              ) / df['RequestCpus']) / df['total_running_time']) * 100
+
+    df["total_q_time"] = df["JobStartDate"].astype(
+        int) - df["QDate"].astype(int)
 
     return df
 
@@ -435,39 +411,31 @@ def get_condor_job_queue() -> pd.DataFrame:
 def determine_condor_job_sizes(df: pd.DataFrame):
     df["mem_bin"] = pd.cut(
         df["RequestMemory"],
-        bins=[0, worker_sizes["regular_mem"],
-              worker_sizes["large_mem"], 10_000_000],
-        labels=["regular", "large", "over-mem"],
+        bins=[0, worker_sizes["regular_mem"], 10_000_000],
+        labels=["regular", "over-mem"],
     )
     df["cpu_bin"] = pd.cut(
         df["RequestCpus"],
-        bins=[0, worker_sizes["regular_cpu"],
-              worker_sizes["large_cpu"], 10_000_000],
-        labels=["regular", "large", "over-cpu"],
+        bins=[0, worker_sizes["regular_cpu"], 10_000_000],
+        labels=["regular", "over-cpu"],
     )
 
     condor_q_status = {}
     mask_running_status = df["JobStatus"].astype(int) == 2
     mask_idle_status = df["JobStatus"].astype(int) == 1
     mask_mem_regular = df["mem_bin"].str.contains("regular")
-    mask_mem_large = df["mem_bin"].str.contains("large")
     mask_cpu_regular = df["cpu_bin"].str.contains("regular")
-    mask_cpu_large = df["cpu_bin"].str.contains("large")
 
     mask_over = df["cpu_bin"].str.contains(
         "over") | df["mem_bin"].str.contains("over")
 
     mask_idle_regular = mask_mem_regular & mask_cpu_regular & mask_idle_status
-    mask_idle_large = (mask_mem_large | mask_cpu_large) & mask_idle_status
 
     condor_q_status["idle_regular"] = sum(mask_idle_regular)
     condor_q_status["running_regular"] = sum(
         mask_mem_regular & mask_cpu_regular & mask_running_status
     )
-    condor_q_status["idle_large"] = sum(mask_idle_large)
-    condor_q_status["running_large"] = sum(
-        (mask_mem_large | mask_cpu_large) & mask_running_status
-    )
+
     condor_q_status["hold_and_impossible"] = sum(mask_over)
 
     condor_q_status["regular_cpu_needed"] = sum(
@@ -475,29 +443,33 @@ def determine_condor_job_sizes(df: pd.DataFrame):
     condor_q_status["regular_mem_needed"] = sum(
         df[mask_idle_regular].RequestMemory)
 
-    condor_q_status["large_cpu_needed"] = sum(df[mask_idle_large].RequestCpus)
-    condor_q_status["large_mem_needed"] = sum(
-        df[mask_idle_large].RequestMemory)
-
     return condor_q_status
 
 
 def need_new_nodes(condor_job_queue: Dict, slurm_workers: Dict, machine: Dict) -> Dict:
+    """
+    Using the two dictionaries from the condor_q and squeue determine if we need any new workers fpr the machine type.
+    """
     workers_needed = 0
 
-    # If we need more than a node add a node (or more)
-    if (
-        condor_job_queue[f"{machine}_cpu_needed"] > worker_sizes[f"{machine}_cpu"]
-        or condor_job_queue[f"{machine}_mem_needed"] > worker_sizes[f"{machine}_mem"]
-    ):
-        # Calculate what we need
-        _cpu = (
-            condor_job_queue[f"{machine}_cpu_needed"] // worker_sizes[f"{machine}_cpu"]
-        )
-        _mem = (
-            condor_job_queue[f"{machine}_mem_needed"] // worker_sizes[f"{machine}_mem"]
-        )
-        workers_needed += max(_cpu, _mem)
+    # Determines how many full (or partially full nodes) we need to create
+    _cpu = (
+        condor_job_queue[f"{machine}_cpu_needed"] /
+        worker_sizes[f"{machine}_cpu"]
+    )
+    _mem = (
+        condor_job_queue[f"{machine}_mem_needed"] /
+        worker_sizes[f"{machine}_mem"]
+    )
+    _cpu = math.floor(_cpu)
+    _mem = math.floor(_mem)
+
+    workers_needed += max(_cpu, _mem)
+
+    # If full workers_needed is 0 but we have work to be done still get a node
+    if workers_needed == 0:
+        if condor_job_queue[f"{machine}_cpu_needed"] or condor_job_queue[f"{machine}_mem_needed"]:
+            workers_needed = 1
 
     # Total number running and pending to run (i.e. worker pool)
     current_pool_size = (
@@ -520,9 +492,6 @@ def need_new_nodes(condor_job_queue: Dict, slurm_workers: Dict, machine: Dict) -
         # Only add up to max pool and no more
         workers_needed = MAX_POOL - current_pool_size
 
-    if workers_needed >= MAX_SUBMIT_SIZE:
-        workers_needed = MAX_SUBMIT_SIZE
-
     return workers_needed
 
 
@@ -532,7 +501,7 @@ def auto_worker(site):
                              site='cori', script='/global/homes/t/tylern/spin_condor/worker.cori.job', isPath=True)
     elif site == 'perlmutter':
         ret = sfapi.post_job(token=access_token.token,
-                             site=site, script='/global/homes/t/tylern/spin_condor/worker.perlmutter.job', isPath=True)
+                             site=site, script='/global/homes/t/tylern/alvarez_condor/worker.perlmutter.ss11.job', isPath=True)
     else:
         return "Not a Valid Site"
     try:
@@ -558,25 +527,31 @@ def rest_workers_needed():
     return response
 
 
+@app.route('/current', methods=['GET', 'POST'])
+def current():
+    return job_queue_df.to_html()
+
+
 def run_workers_needed():
-    condor_job_queue = determine_condor_job_sizes(get_condor_job_queue())
+    global job_queue_df
+    job_queue_df = get_condor_job_queue()
+    condor_job_queue = determine_condor_job_sizes(job_queue_df)
     app.logger.info(condor_job_queue)
-    slurm_workers = get_current_slurm_workers()
+    slurm_workers = get_current_slurm_workers("perlmutter")
     app.logger.info(slurm_workers)
     global workers_needed
     workers_needed = {
         "regular": need_new_nodes(condor_job_queue, slurm_workers, "regular"),
-        "large": need_new_nodes(condor_job_queue, slurm_workers, "large"),
     }
 
     app.logger.info(workers_needed)
     if workers_needed['regular'] > 0:
-        jobid = auto_worker('cori')
+        jobid = auto_worker('perlmutter')
         app.logger.info(f'Starting job {jobid}')
 
     return workers_needed
 
 
 sched = BackgroundScheduler(daemon=True)
-sched.add_job(run_workers_needed, 'interval', minutes=5,)
+sched.add_job(run_workers_needed, 'interval', minutes=2)
 sched.start()

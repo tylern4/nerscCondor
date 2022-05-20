@@ -17,7 +17,7 @@ cd /global/homes/t/tylern/spin_condor
 echo $(date)": Starting Nodes "
 for node in $(scontrol show hostnames ${SLURM_NODELIST}); do
     echo $node
-    srun -N 1 -n 1 -c 1 --gres=craynetwork:1 --overlap start_worker.sh &
+    srun -N 1 -n 1 -c 1 --overlap start_worker.sh &
     sleep 2;
 done;
 
@@ -28,7 +28,7 @@ sleep 200
 echo $(date)": Stopping Nodes "
 for node in $(scontrol show hostnames ${SLURM_NODELIST}); do
     echo $node
-    srun -N 1 -n 1 -c 1 --gres=craynetwork:1 --overlap stop_worker.sh &
+    srun -N 1 -n 1 -c 1 --overlap stop_worker.sh &
     sleep 2;
 done;
 exit
