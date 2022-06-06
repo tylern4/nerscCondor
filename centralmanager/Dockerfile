@@ -2,7 +2,10 @@ ARG VERSION=9.7-el7
 FROM htcondor/mini:$VERSION
 ENV VERSION=$VERSION
 
-RUN yum install -y vim zsh htop \
+
+RUN yum install -y vim zsh htop wget \
+    && wget -O /etc/yum.repos.d/pegasus.repo http://download.pegasus.isi.edu/wms/download/rhel/7/pegasus.repo \
+    && yum install -y pegasus \
     && yum clean all \
     && rm -rf /var/cache/yum
 
