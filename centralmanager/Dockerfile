@@ -2,12 +2,23 @@ ARG VERSION=9.7-el7
 FROM htcondor/mini:$VERSION
 ENV VERSION=$VERSION
 
-
-RUN yum install -y vim zsh htop wget \
-    && wget -O /etc/yum.repos.d/pegasus.repo http://download.pegasus.isi.edu/wms/download/rhel/7/pegasus.repo \
-    && yum install -y pegasus \
+#java-11-openjdk-devel
+RUN yum update -y && yum install -y java-11-openjdk-devel vim zsh htop wget  \
     && yum clean all \
     && rm -rf /var/cache/yum
+
+# && wget -O /etc/yum.repos.d/pegasus.repo http://download.pegasus.isi.edu/wms/download/rhel/7/pegasus.repo \
+#     && yum install -y pegasus \
+
+ARG CROMWELL_VERSION=78
+WORKDIR /cromwell
+RUN wget --quiet -O cromwell.jar https://github.com/broadinstitute/cromwell/releases/download/${CROMWELL_VERSION}/cromwell-${CROMWELL_VERSION}.jar 
+RUN wget --quiet -O womtool.jar https://github.com/broadinstitute/cromwell/releases/download/${CROMWELL_VERSION}/womtool-${CROMWELL_VERSION}.jar 
+
+COPY --chown=submituser:submituser cromwell.conf /cromwell/
+COPY run_cromwell.sh /cromwell/
+RUN chown -R submituser:submituser /cromwell
+
 
 # Default envs 
 ENV USERNAME=docker \
