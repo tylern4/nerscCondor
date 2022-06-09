@@ -1,4 +1,5 @@
 import math
+from platform import node
 import pandas as pd
 import time
 from subprocess import Popen, call, PIPE
@@ -298,6 +299,7 @@ condor_root = ".."
 
 wanted_columns = "ClusterId RequestMemory RequestCpus CumulativeRemoteSysCpu CumulativeRemoteUserCpu JobStatus NumRestarts RemoteHost JobStartDate QDate"
 condor_q_cmd = f"condor_q -allusers -af {wanted_columns}"
+condor_idle_nodes = 'condor_status -const "TotalSlots == 1" -af Machine'
 
 
 ###################### TODO : These should all be created from a configuration file at some point ######################
@@ -318,9 +320,9 @@ squeue_args["perlmutter"] = "--clusters=all"
 ############### TODO : These should all be created from a configuration file at some point ###############
 
 
-def get_current_slurm_workers(site: str = "perlmutter") -> Dict:
+def get_current_slurm_workers(site: str = "perlmutter", ret_df: bool = False) -> Dict:
     user_status = {}
-    squeue_cmd = f'squeue --format="%.18i %D %.24P %.100j %.20u %.10T %S %e" {squeue_args[site]}'
+    squeue_cmd = f'squeue --format="%.18i %N %D %.24P %.100j %.20u %.10T %S %e" {squeue_args[site]}'
 
     _stdout = sfapi.custom_cmd(
         token=access_token.token, cmd=squeue_cmd, site=site)
@@ -365,6 +367,8 @@ def get_current_slurm_workers(site: str = "perlmutter") -> Dict:
     user_status["regular_running"] = sum(
         df[mask_user & mask_running].NODES
     )
+    global slurm_running_df
+    slurm_running_df = df[mask_user]
 
     return user_status
 
@@ -552,6 +556,39 @@ def run_workers_needed():
     return workers_needed
 
 
+def run_cleanup():
+    # Runs a condor_q autoformat to get the desired columns back
+    _stdout, se, ec = run_sh_command(condor_idle_nodes, show_stdout=False)
+    if ec != 0:
+        print(f"ERROR: failed to execute condor_q command: {condor_q_cmd}")
+        return None
+    nodes = _stdout.split("\n")[:-1]
+    app.logger.info(nodes)
+
+    if len(nodes) == 0:
+        return None
+    try:
+        app.logger.info(slurm_running_df.shape)
+    except NameError as e:
+        app.logger.info('no slurm nodes yet')
+        return None
+
+    for node in nodes:
+        try:
+            job_id = slurm_running_df[slurm_running_df.NODELIST ==
+                                      node].JOBID.iloc[0]
+        except IndexError:
+            continue
+
+        app.logger.info(f"Removing {node} with JobID {job_id}")
+        x = sfapi.delete_job(access_token.token,
+                             site='perlmutter', jobid=job_id)
+        app.logger.info(x)
+
+    return nodes
+
+
 sched = BackgroundScheduler(daemon=True)
 sched.add_job(run_workers_needed, 'interval', minutes=2)
+sched.add_job(run_cleanup, 'interval', minutes=10)
 sched.start()
