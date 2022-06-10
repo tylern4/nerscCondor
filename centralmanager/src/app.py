@@ -322,7 +322,7 @@ squeue_args["perlmutter"] = "--clusters=all"
 
 def get_current_slurm_workers(site: str = "perlmutter", ret_df: bool = False) -> Dict:
     user_status = {}
-    squeue_cmd = f'squeue --format="%.18i %N %D %.24P %.100j %.20u %.10T %S %e" {squeue_args[site]}'
+    squeue_cmd = f'squeue --format="%.18i %D %.24P %.100j %.20u %.10T %S %e %.70R" {squeue_args[site]}'
 
     _stdout = sfapi.custom_cmd(
         token=access_token.token, cmd=squeue_cmd, site=site)
@@ -356,9 +356,13 @@ def get_current_slurm_workers(site: str = "perlmutter", ret_df: bool = False) ->
     mask_user = df["USER"] == user_name
     mask_pending = df["STATE"] == "PENDING"
     mask_running = df["STATE"] == "RUNNING"
+
     mask_condor = df["NAME"].str.contains("condor")
 
     mask_user = mask_user & mask_condor
+
+    app.logger.info(sum(mask_pending))
+
     # Each of these selects for a certian type of node based on a set of masks
     # Add the number of nodes to get how many are in each catogory
     user_status["regular_pending"] = sum(
@@ -575,7 +579,7 @@ def run_cleanup():
 
     for node in nodes:
         try:
-            job_id = slurm_running_df[slurm_running_df.NODELIST ==
+            job_id = slurm_running_df[slurm_running_df['NODELIST(REASON)'] ==
                                       node].JOBID.iloc[0]
         except IndexError:
             continue
