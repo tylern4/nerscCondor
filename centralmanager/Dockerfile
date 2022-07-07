@@ -15,7 +15,7 @@ WORKDIR /cromwell
 RUN wget --quiet -O cromwell.jar https://github.com/broadinstitute/cromwell/releases/download/${CROMWELL_VERSION}/cromwell-${CROMWELL_VERSION}.jar 
 RUN wget --quiet -O womtool.jar https://github.com/broadinstitute/cromwell/releases/download/${CROMWELL_VERSION}/womtool-${CROMWELL_VERSION}.jar 
 
-COPY --chown=submituser:submituser cromwell.conf /cromwell/
+# COPY --chown=submituser:submituser cromwell.conf /cromwell/
 COPY run_cromwell.sh /cromwell/
 RUN chown -R submituser:submituser /cromwell
 
@@ -34,9 +34,12 @@ COPY supervisord.conf /etc/supervisord.conf
 COPY src/requirements.txt /app/requirements.txt
 WORKDIR /app
 
-RUN pip3 install --upgrade pip && pip3 install setuptools-rust
-RUN pip3 install -r requirements.txt
-RUN pip3 install git+https://github.com/tylern4/SuperfacilityConnector.git@main
+RUN pip3 install --upgrade pip && \
+    pip3 install setuptools-rust && \
+    pip3 install -r requirements.txt
 
 COPY --chown=submituser:submituser src /app
 RUN chown -R submituser:submituser /app
+
+# Been updating this alot recently
+COPY --chown=submituser:submituser cromwell.conf /cromwell/

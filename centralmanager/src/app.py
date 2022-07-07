@@ -49,6 +49,10 @@ if os.environ.get("PASSWORDFILE") is not None:
 else:
     auth = None
 
+COMPUTE_SITE = 'perlmutter'
+USER_NAME = 'tylern'
+# COMPUTE_SITE = 'cori'
+
 
 def check_file_and_open(file_path: str = "") -> str:
     contents = None
@@ -294,10 +298,9 @@ def run_sh_command(cmd, live=True, log=None,
 #
 # System vars, dirs, and cmds
 #
-user_name = "tylern"
 condor_root = ".."
 
-wanted_columns = "ClusterId RequestMemory RequestCpus CumulativeRemoteSysCpu CumulativeRemoteUserCpu JobStatus NumRestarts RemoteHost JobStartDate QDate"
+wanted_columns = "ClusterId RequestMemory RequestCpus CumulativeRemoteSysCpu CumulativeRemoteUserCpu JobStatus NumJobStarts RemoteHost JobStartDate QDate"
 condor_q_cmd = f"condor_q -allusers -af {wanted_columns}"
 condor_idle_nodes = 'condor_status -const "TotalSlots == 1" -af Machine'
 
@@ -307,69 +310,58 @@ MIN_POOL = 0
 MAX_POOL = 10
 MAX_SUBMIT_SIZE = 10
 
-worker_sizes = {
+worker_sizes_sites = {"perlmutter": {
     "regular_cpu": 256,
-    "regular_mem": 512,
-}
+    "regular_mem": 500,
+},
+    "cori": {
+    "regular_cpu": 64,
+    "regular_mem": 120,
+}}
+
+worker_sizes = worker_sizes_sites[COMPUTE_SITE]
 
 # Extra partition arguments for cori
 squeue_args = {}
-#squeue_args["cori"] = "--clusters=all -p genepool,genepool_shared,exvivo,exvivo_shared"
-# squeue_args["cori"] = "--clusters=all"
+# squeue_args["cori"] = "--clusters=all -p genepool,genepool_shared,exvivo,exvivo_shared"
+squeue_args["cori"] = "--clusters=all"
 squeue_args["perlmutter"] = "--clusters=all"
 ############### TODO : These should all be created from a configuration file at some point ###############
 
 
-def get_current_slurm_workers(site: str = "perlmutter", ret_df: bool = False) -> Dict:
+def get_current_slurm_workers(site: str = COMPUTE_SITE, ret_df: bool = False):
     user_status = {}
-    squeue_cmd = f'squeue --format="%.18i %D %.24P %.100j %.20u %.10T %S %e %.70R" {squeue_args[site]}'
 
-    _stdout = sfapi.custom_cmd(
-        token=access_token.token, cmd=squeue_cmd, site=site)
+    _stdout = sfapi.get_job(token=access_token.token,
+                            site=site, sacct=True, user='tylern')
 
     try:
         _stdout = _stdout['output']
-    except KeyError:
+    except (KeyError, TypeError):
         app.logger.error(
             "No output from squeue, possbily due to maintenance?!")
+        app.logger.error(sfapi.status(name=site))
         return {"regular_pending": 0, "regular_running": 0}
 
-    # Gets jobs from output
-    jobs = [job.split() for job in _stdout.split("\n") if len(job.split()) > 3]
-    # Get column names from list
-    columns = jobs[0]
-    num_cols = len(columns)
-    # Remove all instances of column names from list of jobs
-    jobs = [job for job in jobs if job != columns and len(job) == num_cols]
+    # # Gets jobs from output
+    df = pd.DataFrame(_stdout)
+    df["nnodes"] = df["nnodes"].astype(int)
 
-    # Make dataframe to query with
-    df = pd.DataFrame(jobs, columns=columns)
-    df["NODES"] = df["NODES"].astype(int)
+    mask_user = df["user"] == USER_NAME
+    mask_pending = df["state"] == "PENDING"
+    mask_running = df["state"] == "RUNNING"
 
-    # replace time with value and convert times to datetime
-    for time_col in ["START_TIME", "END_TIME"]:
-        df.loc[df[time_col] == "N/A", time_col] = "2000-01-01T00:00:00"
-        df[time_col] = pd.to_datetime(df[time_col])
-
-    df["TIME_LEFT"] = df["END_TIME"] - df["START_TIME"]
-
-    mask_user = df["USER"] == user_name
-    mask_pending = df["STATE"] == "PENDING"
-    mask_running = df["STATE"] == "RUNNING"
-
-    mask_condor = df["NAME"].str.contains("condor")
+    mask_condor = df["jobname"].str.contains("condor")
 
     mask_user = mask_user & mask_condor
-
-    app.logger.info(sum(mask_pending))
 
     # Each of these selects for a certian type of node based on a set of masks
     # Add the number of nodes to get how many are in each catogory
     user_status["regular_pending"] = sum(
-        df[mask_user & mask_pending].NODES
+        df[mask_user & mask_pending].nnodes
     )
     user_status["regular_running"] = sum(
-        df[mask_user & mask_running].NODES
+        df[mask_user & mask_running].nnodes
     )
     global slurm_running_df
     slurm_running_df = df[mask_user]
@@ -535,6 +527,19 @@ def rest_workers_needed():
     return response
 
 
+@app.route('/rm', methods=['GET', 'POST'])
+def rest_workers_rm():
+    # Super simple to auth
+    # NOTE: Definitly not secure
+    if request.headers.get('Auth') != auth:
+        app.logger.error(f"No Auth, not checking on getting new jobs")
+    else:
+        clean = run_cleanup()
+
+    response = make_response(jsonify(clean), 200)
+    return response
+
+
 @app.route('/current', methods=['GET', 'POST'])
 def current():
     return job_queue_df.to_html()
@@ -545,7 +550,7 @@ def run_workers_needed():
     job_queue_df = get_condor_job_queue()
     condor_job_queue = determine_condor_job_sizes(job_queue_df)
     app.logger.info(condor_job_queue)
-    slurm_workers = get_current_slurm_workers("perlmutter")
+    slurm_workers = get_current_slurm_workers(COMPUTE_SITE)
     app.logger.info(slurm_workers)
     global workers_needed
     workers_needed = {
@@ -554,7 +559,7 @@ def run_workers_needed():
 
     app.logger.info(workers_needed)
     if workers_needed['regular'] > 0:
-        jobid = auto_worker('perlmutter')
+        jobid = auto_worker(COMPUTE_SITE)
         app.logger.info(f'Starting job {jobid}')
 
     return workers_needed
@@ -579,20 +584,20 @@ def run_cleanup():
 
     for node in nodes:
         try:
-            job_id = slurm_running_df[slurm_running_df['NODELIST(REASON)'] ==
-                                      node].JOBID.iloc[0]
+            job_id = slurm_running_df[slurm_running_df['nodelist']
+                                      == node].jobid.iloc[0]
         except IndexError:
             continue
 
         app.logger.info(f"Removing {node} with JobID {job_id}")
         x = sfapi.delete_job(access_token.token,
-                             site='perlmutter', jobid=job_id)
+                             site=COMPUTE_SITE, jobid=job_id)
         app.logger.info(x)
 
     return nodes
 
 
 sched = BackgroundScheduler(daemon=True)
-sched.add_job(run_workers_needed, 'interval', minutes=2)
-sched.add_job(run_cleanup, 'interval', minutes=10)
+sched.add_job(run_workers_needed, 'interval', minutes=10)
+sched.add_job(run_cleanup, 'interval', minutes=15)
 sched.start()
