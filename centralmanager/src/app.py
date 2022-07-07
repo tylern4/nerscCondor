@@ -584,8 +584,8 @@ def run_cleanup():
 
     for node in nodes:
         try:
-            job_id = slurm_running_df[slurm_running_df['nodelist']
-                                      == node].jobid.iloc[0]
+            job_id = slurm_running_df[(slurm_running_df['nodelist'] == node) &
+                                      ~slurm_running_df.state.str.contains("CANCELLED")].jobid.iloc[0]
         except IndexError:
             continue
 
