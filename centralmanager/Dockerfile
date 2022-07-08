@@ -1,4 +1,4 @@
-ARG VERSION=9.7-el7
+ARG VERSION=9.9-el7
 FROM htcondor/mini:$VERSION
 ENV VERSION=$VERSION
 
@@ -15,10 +15,8 @@ WORKDIR /cromwell
 RUN wget --quiet -O cromwell.jar https://github.com/broadinstitute/cromwell/releases/download/${CROMWELL_VERSION}/cromwell-${CROMWELL_VERSION}.jar 
 RUN wget --quiet -O womtool.jar https://github.com/broadinstitute/cromwell/releases/download/${CROMWELL_VERSION}/womtool-${CROMWELL_VERSION}.jar 
 
-# COPY --chown=submituser:submituser cromwell.conf /cromwell/
 COPY run_cromwell.sh /cromwell/
 RUN chown -R submituser:submituser /cromwell
-
 
 # Default envs 
 ENV USERNAME=docker \
@@ -38,8 +36,7 @@ RUN pip3 install --upgrade pip && \
     pip3 install setuptools-rust && \
     pip3 install -r requirements.txt
 
+# Copy in app and config files which could change more regularly
+COPY --chown=submituser:submituser cromwell.conf /cromwell/
 COPY --chown=submituser:submituser src /app
 RUN chown -R submituser:submituser /app
-
-# Been updating this alot recently
-COPY --chown=submituser:submituser cromwell.conf /cromwell/
