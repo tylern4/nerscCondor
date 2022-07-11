@@ -50,9 +50,12 @@ COLLECTOR_DEBUG = D_FULLDEBUG
 NEGOTIATOR_DEBUG = D_FULLDEBUG
 MATCH_DEBUG = D_FULLDEBUG
 SCHEDD_DEBUG = D_FULLDEBUG
+
+SYSTEM_PERIODIC_HOLD_SUBCODE = MemoryUsage > RequestMemory
+SYSTEM_PERIODIC_HOLD = JobRunCount > 10 || MemoryUsage > RequestMemory
 """
 
-cori_conf = """########################################
+perlmutter_conf = """########################################
 # Config created by /root/config/startup.py
 # Host and port
 CONDOR_HOST = {HOSTNAME}:{PORT}
@@ -75,11 +78,21 @@ KILL = False
 
 use feature:PartitionableSlot
 
+# hold jobs that are more than 10% over memory assigned to the slot.
+# https://htcondor.org/wiki-archive/pages/HowToLimitMemoryUsage
+MEMORY_EXCEEDED = ((MemoryUsage*1.1 > Memory) =!= TRUE)
+PREEMPT = ($(PREEMPT)) || $(MEMORY_EXCEEDED)
+WANT_SUSPEND = $(WANT_SUSPEND) && $(MEMORY_EXCEEDED)
+WANT_HOLD = $(MEMORY_EXCEEDED)
+WANT_HOLD_REASON = ifThenElse( $(MEMORY_EXCEEDED), \
+               "high_mem_usage", \
+               undefined )
+
 USE_SHARED_PORT = True
 
-LOCAL_DIR = /global/cscratch1/sd/{USERNAME}/condor/$(HOSTNAME)
-# For perlmutter change this
-# LOCAL_DIR = /pscratch/sd/{FIRSTLETTER}/{USERNAME}/condor/$(HOSTNAME)
+# For cori change this
+# LOCAL_DIR = /global/cscratch1/sd/{USERNAME}/condor/$(HOSTNAME)
+LOCAL_DIR = /pscratch/sd/{FIRSTLETTER}/{USERNAME}/condor/$(HOSTNAME)
 RELEASE_DIR = /global/common/software/m3792/htcondor
 
 SEC_PASSWORD_FILE = /global/homes/{FIRSTLETTER}/{USERNAME}/.condor/{PASSWORDFILE}
@@ -102,7 +115,7 @@ if __name__ == '__main__':
                 for key in ["USERNAME", "PORT", "HOSTNAME", "PASSWORDFILE"]}
     env_vars["FIRSTLETTER"] = env_vars["USERNAME"][0]
     # Prints a file to be copy/pasted into a config file for cori
-    print(cori_conf.format(**env_vars))
+    print(perlmutter_conf.format(**env_vars))
 
     with open("/etc/condor/config.d/95-NERSC.conf", 'w') as config:
         config.write(config_template.format(**env_vars))
