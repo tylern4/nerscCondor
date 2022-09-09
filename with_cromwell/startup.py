@@ -50,12 +50,9 @@ COLLECTOR_DEBUG = D_FULLDEBUG
 NEGOTIATOR_DEBUG = D_FULLDEBUG
 MATCH_DEBUG = D_FULLDEBUG
 SCHEDD_DEBUG = D_FULLDEBUG
-
-SYSTEM_PERIODIC_HOLD_SUBCODE = MemoryUsage > RequestMemory
-SYSTEM_PERIODIC_HOLD = JobRunCount > 100 || MemoryUsage > RequestMemory
 """
 
-perlmutter_conf = """########################################
+cori_conf = """########################################
 # Config created by /root/config/startup.py
 # Host and port
 CONDOR_HOST = {HOSTNAME}:{PORT}
@@ -77,17 +74,15 @@ PREEMPT = False
 KILL = False
 
 use feature:PartitionableSlot
-use feature : GPUs
 
 USE_SHARED_PORT = True
 
-SCRATCH_DIR = $ENV(SCRATCH:/pscratch/sd/{FIRSTLETTER}/{USERNAME})
-HOME_DIR = $ENV(HOME:/global/homes/{FIRSTLETTER}/{USERNAME})
-LOCAL_DIR = $(SCRATCH_DIR)/condor/$(HOSTNAME)
+LOCAL_DIR = /global/cscratch1/sd/{USERNAME}/condor/$(HOSTNAME)
+# For perlmutter change this
+# LOCAL_DIR = /pscratch/sd/{FIRSTLETTER}/{USERNAME}/condor/$(HOSTNAME)
+RELEASE_DIR = /global/common/software/m3792/htcondor
 
-RELEASE_DIR = /global/common/software/m3792/alvarez/htcondor
-
-SEC_PASSWORD_FILE = $(HOME_DIR)/.condor/spin.password
+SEC_PASSWORD_FILE = /global/homes/{FIRSTLETTER}/{USERNAME}/.condor/{PASSWORDFILE}
 SEC_DEFAULT_AUTHENTICATION_METHODS = PASSWORD, FS
 
 ALLOW_READ = 128.55.*, 10.*
@@ -98,17 +93,6 @@ COLLECTOR_DEBUG = D_FULLDEBUG
 NEGOTIATOR_DEBUG = D_FULLDEBUG
 MATCH_DEBUG = D_FULLDEBUG
 SCHEDD_DEBUG = D_FULLDEBUG
-STARTER_ALLOW_RUNAS_OWNER = True
-
-# hold jobs that are more than 2x over memory assigned to the slot.
-# https://htcondor.org/wiki-archive/pages/HowToLimitMemoryUsage
-MEMORY_EXCEEDED = ((MemoryUsage*2 > Memory) =!= TRUE)
-PREEMPT = ($(PREEMPT)) || $(MEMORY_EXCEEDED)
-WANT_SUSPEND = $(WANT_SUSPEND) && $(MEMORY_EXCEEDED)
-WANT_HOLD = $(MEMORY_EXCEEDED)
-WANT_HOLD_REASON = ifThenElse( $(MEMORY_EXCEEDED), \
-               "high_mem_usage", \
-               undefined )
 
 ########################################"""
 
@@ -118,7 +102,7 @@ if __name__ == '__main__':
                 for key in ["USERNAME", "PORT", "HOSTNAME", "PASSWORDFILE"]}
     env_vars["FIRSTLETTER"] = env_vars["USERNAME"][0]
     # Prints a file to be copy/pasted into a config file for cori
-    print(perlmutter_conf.format(**env_vars))
+    print(cori_conf.format(**env_vars))
 
-    with open("/home/submituser/condor/config.d/95-NERSC.conf", 'w') as config:
+    with open("/etc/condor/config.d/95-NERSC.conf", 'w') as config:
         config.write(config_template.format(**env_vars))

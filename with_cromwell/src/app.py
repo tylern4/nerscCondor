@@ -330,25 +330,18 @@ squeue_args["perlmutter"] = "--clusters=all"
 
 
 def get_current_slurm_workers(site: str = COMPUTE_SITE, ret_df: bool = False):
-    user_status = {"regular_pending": 0, "regular_running": 0}
-
-    nersc_status = sfapi.status(name=COMPUTE_SITE)
-    if nersc_status['status'] != 'active':
-        app.logger.error(sfapi.status(name=site))
-        return user_status
+    user_status = {}
 
     _stdout = sfapi.get_job(token=access_token.token,
                             site=site, sacct=True, user='tylern')
+
     try:
         _stdout = _stdout['output']
     except (KeyError, TypeError):
         app.logger.error(
             "No output from squeue, possbily due to maintenance?!")
         app.logger.error(sfapi.status(name=site))
-        return user_status
-
-    if isinstance(_stdout, list) and len(_stdout) == 0:
-        return user_status
+        return {"regular_pending": 0, "regular_running": 0}
 
     # # Gets jobs from output
     df = pd.DataFrame(_stdout)
@@ -396,6 +389,7 @@ def get_condor_job_queue() -> pd.DataFrame:
     # Create a dataframe from the split outputs
     df = pd.DataFrame(queued_jobs, columns=columns)
     # Change the type
+    df["RequestMemory"] = df["RequestMemory"].astype(int)
     df["JobStatus"] = df["JobStatus"].astype(int)
     df["RequestMemory"] = df["RequestMemory"].astype(float) / 1024
     df["RequestCpus"] = df["RequestCpus"].astype(float)
@@ -429,13 +423,11 @@ def determine_condor_job_sizes(df: pd.DataFrame):
     condor_q_status = {}
     mask_running_status = df["JobStatus"].astype(int) == 2
     mask_idle_status = df["JobStatus"].astype(int) == 1
-    mask_hold_status = df["JobStatus"].astype(int) == 5
-
     mask_mem_regular = df["mem_bin"].str.contains("regular")
     mask_cpu_regular = df["cpu_bin"].str.contains("regular")
 
-    mask_over = (df["cpu_bin"].str.contains(
-        "over") | df["mem_bin"].str.contains("over") | mask_hold_status)
+    mask_over = df["cpu_bin"].str.contains(
+        "over") | df["mem_bin"].str.contains("over")
 
     mask_idle_regular = mask_mem_regular & mask_cpu_regular & mask_idle_status
 
@@ -504,11 +496,6 @@ def need_new_nodes(condor_job_queue: Dict, slurm_workers: Dict, machine: Dict) -
 
 
 def auto_worker(site):
-    nersc_status = sfapi.status(name=COMPUTE_SITE)
-    if nersc_status['status'] != 'active':
-        app.logger.error(nersc_status)
-        return None
-
     if site == 'cori':
         ret = sfapi.post_job(token=access_token.token,
                              site='cori', script='/global/homes/t/tylern/spin_condor/worker.cori.job', isPath=True)

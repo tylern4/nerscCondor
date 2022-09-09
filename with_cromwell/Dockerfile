@@ -37,7 +37,6 @@ RUN pip3 install --upgrade pip && \
     pip3 install -r requirements.txt
 
 # Copy in app and config files which could change more regularly
-ENV CONDOR_CONFIG=/home/submituser/condor/config.d/95-NERSC.conf
 COPY --chown=submituser:submituser cromwell.conf /cromwell/
 COPY --chown=submituser:submituser src /app
 RUN chown -R submituser:submituser /app

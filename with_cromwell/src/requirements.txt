@@ -1,0 +1,6 @@
+flask
+gunicorn
+pandas
+numpy
+apscheduler
+git+https://github.com/tylern4/SuperfacilityConnector.git@main
