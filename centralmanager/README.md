@@ -13,3 +13,5 @@ This is the scrontab that starts up on perlmutter every day at 8am pst.
 0 15 * * 1-5 /global/homes/t/tylern/htcondor_workflow_scron/startup_htcondor.sh
 ```
 
+This will call `startup_htcondor.sh` which creates the config files and starts up the HTCondor centarl manager.
+
