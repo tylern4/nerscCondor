@@ -1,16 +1,17 @@
 #!/bin/bash 
 #SBATCH -N 1
-#SBATCH -C gpu
-#SBATCH -A nstaff_g
+#SBATCH -C cpu
+#SBATCH -A nstaff
 #SBATCH -t 00:15:00
-#SBATCH --job-name=htcondor_worker_gpu
+#SBATCH --job-name=htcondor_worker_large
 #SBATCH --exclusive
 
 #SBATCH -e logs/multinode_%j.err
 #SBATCH -o logs/multinode_%j.out
 
 # Move to the correct folder
-cd /global/homes/t/tylern/htcondor_workflow_scron
+cd ${HOME}/nerscCondor/submitScripts
+ln -s ../centralmanager/conf_worker.conf .
 
 # For each node start a worker
 echo $(date)": Starting Nodes "
