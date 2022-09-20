@@ -114,3 +114,4 @@ dmypy.json
 .pyre/
 
 spinConfig/centralmanager/src/spin.password
+starterlog.out

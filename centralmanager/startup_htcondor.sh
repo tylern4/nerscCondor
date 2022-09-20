@@ -11,7 +11,7 @@ export PORT=9618
 export PASSWORDFILE=${HOME}/.condor/spin.password
 export CONDOR_INSTALL=/global/common/software/m3792/htcondor
 export PATH=${PATH}:${CONDOR_INSTALL}/bin:${CONDOR_INSTALL}/sbin
-export CONDOR_CONFIG=${HOME}/htcondor_workflow_scron/conf_server.conf
+export CONDOR_CONFIG=${HOME}/nerscCondor/centralmanager/conf_server.conf
 
 python startup.py
 
