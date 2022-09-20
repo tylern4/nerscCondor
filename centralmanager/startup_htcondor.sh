@@ -1,4 +1,4 @@
-#!/usr/bin/env bash -l
+#!/usr/bin/env bash
 
 # Checks if scratch is valid
 #if [[ $SCRATCH == *"UNKNOWN"* ]]; then
