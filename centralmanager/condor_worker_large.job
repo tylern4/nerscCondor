@@ -1,0 +1,25 @@
+#!/bin/bash 
+#SBATCH -N 1
+#SBATCH -C cpu
+#SBATCH -A nstaff
+#SBATCH -t 00:15:00
+#SBATCH --job-name=htcondor_worker_large
+#SBATCH --exclusive
+
+#SBATCH -e logs/multinode_%j.err
+#SBATCH -o logs/multinode_%j.out
+
+# Move to the correct folder
+cd /global/homes/t/tylern/htcondor_workflow_scron
+
+# For each node start a worker
+echo $(date)": Starting Nodes "
+./start_worker.sh &
+
+# Sleep for a little less than the time limit
+sleep 20000
+
+# For each node end a 
+./stop_worker.sh &
+sleep 2
+exit
