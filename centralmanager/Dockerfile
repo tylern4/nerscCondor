@@ -2,12 +2,8 @@ ARG VERSION=9.7-el7
 FROM htcondor/mini:$VERSION
 ENV VERSION=$VERSION
 
-WORKDIR /home/submituser/condor
+RUN ln -s /usr/libexec/condor/* /usr/libexec
 
-ENV USER=docker \
-    HOSTNAME=0.0.0.0 \
-    PORT=9816 \
-    PASSWORDFILE=spin.password
+ENV CONDOR_CONFIG=/data/htcondorlogs/95-NERSC.conf
+COPY start.sh /start.sh
 
-COPY startup.py /root/config/startup.py
-COPY pre-exec.sh /root/config/pre-exec.sh
