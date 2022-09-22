@@ -1,0 +1,36 @@
+#!/bin/bash 
+#SBATCH -N 1
+#SBATCH -C cpu
+#SBATCH -A nstaff
+#SBATCH -t 00:15:00
+#SBATCH --job-name=htcondor_worker_large
+#SBATCH --exclusive
+
+#SBATCH -e logs/htcondor_%j.err
+#SBATCH -o logs/htcondor_%j.out
+
+# Move to the correct folder
+cd ${HOME}/nerscCondor/submitScripts
+
+# For each node start a worker
+echo $(date)": Starting Nodes "
+
+export LOGDIR=${CFS}/nstaff/tylern/htcondorscratch
+export PORT=9618
+export PASSWORDFILE=${HOME}/.condor/cron.password
+export CONDOR_INSTALL=/global/common/software/m3792/htcondor
+export PATH=${PATH}:${CONDOR_INSTALL}/bin:${CONDOR_INSTALL}/sbin
+export CONDOR_SERVER=$(cat ${LOGDIR}/currenthost)
+
+rm -rf ${LOGDIR}/$(hostname)
+
+mkdir -p ${LOGDIR}/$(hostname)/log
+mkdir -p ${LOGDIR}/$(hostname)/execute
+mkdir -p ${LOGDIR}/$(hostname)/spool
+
+export CONDOR_CONFIG=${HOME}/nerscCondor/centralmanager/htcondor_worker.conf
+
+condor_master
+
+sleep infinity
+

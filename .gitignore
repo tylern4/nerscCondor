@@ -115,3 +115,5 @@ dmypy.json
 
 spinConfig/centralmanager/src/spin.password
 starterlog.out
+
+submitScripts/logs

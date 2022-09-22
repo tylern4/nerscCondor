@@ -6,14 +6,15 @@
 #    export LOGDIR=$SCRATCH/htcondorscratch
 #fi
 export LOGDIR=${CFS}/nstaff/tylern/htcondorscratch
-
 export PORT=9618
-export PASSWORDFILE=${HOME}/.condor/spin.password
+export PASSWORDFILE=${HOME}/.condor/cron.password
 export CONDOR_INSTALL=/global/common/software/m3792/htcondor
 export PATH=${PATH}:${CONDOR_INSTALL}/bin:${CONDOR_INSTALL}/sbin
-export CONDOR_CONFIG=${HOME}/nerscCondor/centralmanager/conf_server.conf
+export CONDOR_SERVER=$(hostname)
 
-python startup.py
+
+
+export CONDOR_CONFIG=${HOME}/nerscCondor/centralmanager/htcondor_server.conf
 
 echo $LOGDIR
 mkdir -p $LOGDIR/$(hostname)/log
