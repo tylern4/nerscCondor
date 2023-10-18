@@ -11,6 +11,10 @@ export CONDOR_INSTALL=/path/to/condor
 export PATH=${CONDOR_INSTALL}/bin:${CONDOR_INSTALL}/sbin:$PATH
 ```
 
+## Using scrontab to start htcondor
+
+
+
 
 ## Setting up pegasus
 
@@ -29,3 +33,12 @@ conda create -n pegasus python=3.10
 conda activate pegasus
 conda install -c conda-forge pegasus-wms
 ```
+
+### Configuring to work with slurm
+
+- [ ] run pegasus command to put files in right place
+- [ ] also put them in `~/.blah`
+- [ ] `~/.blah/user.config` > `blah_debug_save_submit_info=/path/to/slurmjobs` to look at slurm jobs
+
+'site.yml' doesn't work. Needs to be modified to use `globus: totalmemory` or better is to figure out when `/global/common/software/m3792/htcondor-9.11.2/libexec/blahp/slurm_submit.sh` and modify the memory (and out and err files) before submitting.
+
